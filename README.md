@@ -179,7 +179,7 @@ MAX_DAYS = 60     # 超过 60 天视为水平位移，不是爆发
 
 分歧 97 条，集中在 `rule=double / llm=single`（87 条）：规则把「一个大尖峰 + 几个小波动」也判成双峰，而人眼更倾向单峰。另有 4 条规则说 single 我判 double、4 条我判 plateau。
 
-这些分歧**没有自动裁定**，留在 `data/interim/episodes_to_review.csv`，配图 `notebooks/figures/review_double.png`（20 条样例）和 `review_other.png`。
+这些分歧**没有自动裁定**。打开 `notebooks/label_review.html`（双击就行，图全部内嵌，不需要起服务器），97 条逐条选，选完点「导出 CSV」，得到 `episodes_labeled.csv`（745 行，其中 648 条已填好），放进 `data/interim/` 就能训练。进度存在浏览器本地，关掉再打开不会丢。
 
 这一轮对比抓到了一个真实的 bug：原来的平台判据是「≥40% 的天数在高位」，在 4–5 天的短事件里，只要前两天高就会被判成平台。已改成「连续 ≥3 天在高位，且占比 ≥25%」，平台从 41 条降到 3 条，一致率从 81.6% 升到 87.0%。
 
@@ -200,7 +200,7 @@ t 日的注意力指数视为 t 日收盘后可得，因此标签从 t+1 开始�
 
 ## 下一步
 
-1. 裁定 `data/interim/episodes_to_review.csv` 里的 97 条分歧，存成 `data/interim/episodes_labeled.csv`（`shape` 列）。
+1. 打开 `notebooks/label_review.html` 裁定 97 条 → 导出 `episodes_labeled.csv` 放进 `data/interim/`。
 2. `python -m src.models` —— 20/40/60% 前缀 → 三类形状，逻辑回归 + LightGBM，按 2018 年切分。
 3. 接 CRSP：R20 / MDD20，做「首次可靠判断时价格已经走了多少」的窗口分析。
 4. 财报日虚拟变量：用 8-K/`rdq` 把事件型披露和非事件型宣传分开，检验 C2。

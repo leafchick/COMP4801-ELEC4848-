@@ -17,6 +17,8 @@ episode on the same side of the split.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -230,23 +232,38 @@ def majority_baseline(train: pd.DataFrame, test: pd.DataFrame) -> dict:
 # entry point
 # --------------------------------------------------------------------------
 if __name__ == "__main__":
+    import sys
+
     from .load_data import AS_OF_DEFAULT, INTERIM, load_social_signal, wide_attention
 
-    labeled = INTERIM / "episodes_labeled.csv"
+    # Optional CLI arg: path to a label file.  The label file only needs
+    # (episode_id, shape_final); everything else comes from episodes.csv.
+    labeled = Path(sys.argv[1]) if len(sys.argv) > 1 else INTERIM / "episodes_labeled.csv"
     if not labeled.exists():
-        print("No labels yet.")
-        print(f"1. open {INTERIM / 'episodes_to_label.csv'}")
-        print("2. fill the 'shape' column with single / double / plateau")
-        print(f"3. save it as {labeled}")
+        print(f"No labels yet: {labeled}")
+        print("1. open notebooks/label_review.html in a browser")
+        print("2. label the 97 unresolved episodes and click '导出 CSV'")
+        print("3. put the downloaded episodes_labeled.csv into data/interim/")
         print("4. run this module again")
         raise SystemExit(0)
 
-    ep = pd.read_csv(labeled, parse_dates=["start", "end", "confirm", "peak_date"])
+    labels = pd.read_csv(labeled)
+    if "shape_final" not in labels.columns:
+        raise KeyError(f"{labeled} must have an 'episode_id' and 'shape_final' column")
+
+    ep = pd.read_csv(INTERIM / "episodes.csv", parse_dates=["start", "end", "confirm", "peak_date"])
+    ep = ep.merge(labels[["episode_id", "shape_final"]], on="episode_id", how="left")
+    ep = ep.rename(columns={"shape_final": "shape"})
+    ep = ep.loc[ep["shape"].isin(SHAPES)].copy()
+    if ep.empty:
+        raise SystemExit("no labelled episodes found")
+
     df = load_social_signal(AS_OF_DEFAULT)
     Z = wide_attention(df, AS_OF_DEFAULT)
 
     table = build_table(ep, Z)
     train, test = split_by_date(table)
+    print(f"episodes labelled {ep['episode_id'].nunique():,}")
     print(f"rows {len(table):,} | train {len(train):,} | test {len(test):,}")
     print("train labels:", train["label"].value_counts().to_dict())
     print("test  labels:", test["label"].value_counts().to_dict())
