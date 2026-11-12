@@ -1,0 +1,16 @@
+# data is local only: too large for git, and the source file is not ours to redistribute
+data/
+
+# environments and build artefacts
+.venv/
+wheels/
+.tmp/
+.matplotlib/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+install.log
+
+# course documents stay on disk; delete these two lines to version them
+*.pdf
+*.pptx
