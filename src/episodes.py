@@ -238,18 +238,25 @@ def describe_path(seg_z: np.ndarray) -> dict:
     sig = [p for p, pr in zip(peaks, prom) if pr >= 0.40 and vn[p] >= 0.5]
     sig = sorted(sig, key=lambda i: -vn[i])[:2]
 
-    flat_share = float(np.mean(vn >= 0.75))
+    # plateau = a flat top that lasts, not "two high days out of five".  In a
+    # short episode the share test alone fires on any plain rise-then-fall.
+    run = best_run = 0
+    for x in vn:
+        run = run + 1 if x >= 0.75 else 0
+        best_run = max(best_run, run)
+    is_plateau = best_run >= 3 and best_run / n >= 0.25
+    flat_share = best_run / n
 
     if len(sig) >= 2:
         i1, i2 = sorted(sig)
         valley = float(vn[i1 : i2 + 1].min())
         if valley < 0.60:
             shape = "double"
-        elif flat_share >= 0.40:
+        elif is_plateau:
             shape = "plateau"
         else:
             shape = "single"
-    elif flat_share >= 0.40:
+    elif is_plateau:
         shape = "plateau"
     else:
         shape = "single"

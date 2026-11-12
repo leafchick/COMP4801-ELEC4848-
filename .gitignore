@@ -14,3 +14,7 @@ install.log
 # course documents stay on disk; delete these two lines to version them
 *.pdf
 *.pptx
+
+# IDE
+.idea/
+.vscode/
