@@ -2,8 +2,15 @@
 
 Given an episode that is still unfolding, we only see its first 20% / 40% /
 60% (measured in trading days of the completed episode).  The task is to
-predict which of three shapes it will end up as: ``single``, ``double`` or
-``plateau``.
+predict whether it ends up as a single burst or not: ``single`` vs ``multi``
+(``multi`` covers the old double and plateau classes).
+
+The three-way vocabulary is kept in the labelling sheet and in the episode
+table, but it is not modelled: plateau is ~1-2% of episodes, and a class that
+small cannot be fitted -- with balanced weights a model would trade hundreds
+of false plateaus for one true one, and without them it would never predict
+the class at all.  ``multi`` merges double and plateau, which is also the
+distinction that matters: does attention come back after the first burst?
 
 Two models, on purpose:
 
@@ -22,11 +29,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .episodes import SHAPES
-
 PREFIX_FRACTIONS = (0.2, 0.4, 0.6)
 CUTOFF = "2018-01-01"
 LABEL_COL = "shape"
+
+# "double" and "plateau" are accepted so an older three-class label file still
+# loads, but the modelled task is single vs multi.
+LABELS = ("single", "multi", "double", "plateau")
 
 
 # --------------------------------------------------------------------------
@@ -118,7 +127,7 @@ def build_table(ep: pd.DataFrame, Z: pd.DataFrame, fracs=PREFIX_FRACTIONS,
     if label_col not in ep.columns:
         raise KeyError(f"no '{label_col}' column; fill it in the labelling sheet first")
 
-    d = ep.loc[(ep["status"] == "complete") & ep[label_col].isin(SHAPES)].copy()
+    d = ep.loc[(ep["status"] == "complete") & ep[label_col].isin(LABELS)].copy()
     if d.empty:
         raise ValueError("no labelled completed episodes")
 
@@ -193,24 +202,40 @@ def fit_lightgbm(train: pd.DataFrame, feature_cols=None):
 
 
 def score(model, test: pd.DataFrame, feature_cols=None) -> dict:
-    from sklearn.metrics import accuracy_score, f1_score, log_loss
+    from sklearn.metrics import (
+        accuracy_score,
+        f1_score,
+        log_loss,
+        recall_score,
+        roc_auc_score,
+    )
 
     cols = feature_cols or _FEATURES
     y = test["label"].to_numpy()
     proba = model.predict_proba(test[cols])
-    classes = model.classes_
-    pred = classes[np.argmax(proba, axis=1)]
+    classes = list(model.classes_)
+    pred = model.classes_[np.argmax(proba, axis=1)]
 
-    onehot = (y[:, None] == classes[None, :]).astype("float64")
+    onehot = (y[:, None] == model.classes_[None, :]).astype("float64")
     brier = float(np.mean(np.sum((proba - onehot) ** 2, axis=1)))
 
-    return {
+    out = {
         "n": int(len(y)),
         "accuracy": float(accuracy_score(y, pred)),
         "macro_f1": float(f1_score(y, pred, average="macro")),
-        "log_loss": float(log_loss(y, proba, labels=classes)),
+        "log_loss": float(log_loss(y, proba, labels=model.classes_)),
         "brier": brier,
     }
+    if len(classes) == 2:
+        # sklearn sorts class names, so classes[1] is not necessarily "multi"
+        pos = "multi" if "multi" in classes else classes[1]
+        k = classes.index(pos)
+        y_bin = (y == pos).astype(int)
+        out["roc_auc_multi"] = float(roc_auc_score(y_bin, proba[:, k]))
+        out["recall_multi"] = float(
+            recall_score(y, pred, labels=[pos], average=None)[0]
+        )
+    return out
 
 
 def majority_baseline(train: pd.DataFrame, test: pd.DataFrame) -> dict:
@@ -241,8 +266,8 @@ if __name__ == "__main__":
     labeled = Path(sys.argv[1]) if len(sys.argv) > 1 else INTERIM / "episodes_labeled.csv"
     if not labeled.exists():
         print(f"No labels yet: {labeled}")
-        print("1. open notebooks/label_review.html in a browser")
-        print("2. label the 97 unresolved episodes and click '导出 CSV'")
+        print("1. open notebooks/label_all.html in a browser")
+        print("2. label all 745 episodes (single / multi) and click '导出 CSV'")
         print("3. put the downloaded episodes_labeled.csv into data/interim/")
         print("4. run this module again")
         raise SystemExit(0)
@@ -251,10 +276,15 @@ if __name__ == "__main__":
     if "shape_final" not in labels.columns:
         raise KeyError(f"{labeled} must have an 'episode_id' and 'shape_final' column")
 
+    # accept an older three-class export by collapsing double/plateau into multi
+    labels["shape_final"] = labels["shape_final"].replace(
+        {"double": "multi", "plateau": "multi"}
+    )
+
     ep = pd.read_csv(INTERIM / "episodes.csv", parse_dates=["start", "end", "confirm", "peak_date"])
     ep = ep.merge(labels[["episode_id", "shape_final"]], on="episode_id", how="left")
     ep = ep.rename(columns={"shape_final": "shape"})
-    ep = ep.loc[ep["shape"].isin(SHAPES)].copy()
+    ep = ep.loc[ep["shape"].isin(LABELS)].copy()
     if ep.empty:
         raise SystemExit("no labelled episodes found")
 
