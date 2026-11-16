@@ -253,6 +253,25 @@ def majority_baseline(train: pd.DataFrame, test: pd.DataFrame) -> dict:
     }
 
 
+def score_by_prefix(model, test: pd.DataFrame, feature_cols=None) -> pd.DataFrame:
+    """Metrics at each observation fraction -- the accuracy-earliness curve.
+
+    Pooling the three prefixes hides the thing the project is about: how much
+    the prediction improves as the episode unfolds.
+    """
+    rows = []
+    for f in sorted(test["frac"].unique()):
+        r = score(model, test.loc[test["frac"] == f], feature_cols)
+        r["frac"] = float(f)
+        rows.append(r)
+    cols = ["frac", "n", "accuracy", "macro_f1", "log_loss", "brier"]
+    out = pd.DataFrame(rows)
+    for extra in ("roc_auc_multi", "recall_multi"):
+        if extra in out.columns:
+            cols.append(extra)
+    return out[cols].round(3)
+
+
 # --------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------
@@ -298,9 +317,15 @@ if __name__ == "__main__":
     print("train labels:", train["label"].value_counts().to_dict())
     print("test  labels:", test["label"].value_counts().to_dict())
 
+    base = majority_baseline(train, test)
+    print(f"\nmajority baseline: acc {base['accuracy']:.3f} | macro-F1 {base['macro_f1']:.3f}")
+
     for name, fit in (("logistic", fit_logistic), ("lightgbm", fit_lightgbm)):
         try:
             model = fit(train)
-            print(f"\n{name}: {score(model, test)}")
+            print(f"\n=== {name} (pooled) ===")
+            print(score(model, test))
+            print(f"\n=== {name} (by observation fraction) ===")
+            print(score_by_prefix(model, test).to_string(index=False))
         except Exception as exc:
             print(f"\n{name}: skipped ({exc})")
