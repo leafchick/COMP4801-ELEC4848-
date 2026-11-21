@@ -45,6 +45,51 @@ python -m src.episodes       # 分段 + 写 CSV + 出预览图
 
 ---
 
+## 协作
+
+### 仓库里有什么、没有什么
+
+**有**：代码（`src/`）、报告（`M2_report.md`）、标注页（`notebooks/label_all.html`、`kappa_sample.html`）、WRDS 查询（`notebooks/wrds_extract.sql`）、图（`notebooks/figures/`）。
+
+**没有**：`data/` 全部内容。原因有两个——体积，以及 CRSP 的许可只覆盖 HKU 订阅用户，不能随仓库分发。
+
+所以新人 clone 下来之后，`data/` 是空的，必须自己准备。下面逐项说明。
+
+### 数据获取
+
+| 文件 | 怎么拿 | 能不能给别人 |
+|---|---|---|
+| `data/raw/social_signal_index.dta` | 见下方「注意力」一节，Mendeley 公开下载 | ✅ CC BY 4.0，可以共享 |
+| `data/raw/crsp_*.parquet` | 自己的 HKU WRDS 账号，跑 `notebooks/wrds_extract.sql` | ❌ 许可限制，不能共享 |
+| `data/raw/fnspid_*.csv` | HuggingFace `Zihan1004/FNSPID`，需要重新流式解析 | ✅ CC BY-NC 4.0 |
+
+**如果新成员没有 WRDS 账号**：他可以跑通 `src/load_data.py`、`src/episodes.py`、`src/models.py`（只需要 Social Signal），但 `src/returns.py` 和 `src/news.py` 跑不了。分工时要注意这一点。
+
+### 四个可复现的入口
+
+```bash
+python -m src.load_data     # 数据自检
+python -m src.episodes      # 分段 → data/interim/episodes.csv
+python -m src.models        # 形状分类（需要 episodes_labeled.csv）
+python -m src.returns       # CRSP 面板 + Model A–C + 行动窗口
+python -m src.news          # Model C vs D
+```
+
+### 分支约定
+
+- `main` 永远保持可运行，不直接在上面改
+- 每人开自己的分支：`git checkout -b feat/xxx`，完成后提 PR
+- 提交前跑一遍 `python -m src.load_data`，确认没把数据路径写死
+- **不要提交 `data/` 里的任何东西**（`.gitignore` 已经挡了，但别用 `git add -f`）
+
+### 会被 git 忽略的
+
+`data/`、`.venv/`、`wheels/`、`.matplotlib/`、`.idea/`、`*.pdf`、`*.pptx`、`browser-screenshots/`。
+
+课程文档（proposal、guideline、deck）留在本地；如果想让它们进版本库，删掉 `.gitignore` 最后两行即可。
+
+---
+
 ## 数据
 
 ### 注意力（主信号）
