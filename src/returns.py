@@ -231,6 +231,30 @@ def window_summary(w: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def residual_drawdown(df: pd.DataFrame) -> pd.DataFrame:
+    """Drawdown after removing what volatility/size/turnover already explain.
+
+    A high-volatility stock has a deep MDD20 almost mechanically, so the raw
+    drawdown AUC says nothing about attention.  MDD20 is regressed on those
+    three state variables (train only) and the residuals are correlated with
+    the attention features.  A correlation near zero means attention carries
+    no independent drawdown information.
+    """
+    from scipy.stats import spearmanr
+    from sklearn.linear_model import LinearRegression
+
+    train, test = split(df)
+    cols = ["vol60", "lsize", "turnover"]
+    reg = LinearRegression().fit(train[cols].fillna(train[cols].median()), train["mdd20"])
+    resid = test["mdd20"] - reg.predict(test[cols].fillna(test[cols].median()))
+
+    rows = []
+    for feat in ("peak_z", "base0", "mean_ratio", "n_days", "n_obs"):
+        rho, p = spearmanr(resid, test[feat], nan_policy="omit")
+        rows.append({"feature": feat, "spearman_rho": rho, "p_value": p})
+    return pd.DataFrame(rows)
+
+
 if __name__ == "__main__":
     panel = build_panel()
     df = add_targets(episode_outcomes(panel))
@@ -240,5 +264,7 @@ if __name__ == "__main__":
     print(compare(df).pivot(index="outcome", columns="model", values="auc").round(3).to_string())
     print("\n=== how much of drawdown is just volatility ===")
     print(diagnose_drawdown(df).round(3).to_string(index=False))
+    print("\n=== drawdown after removing volatility/size/turnover ===")
+    print(residual_drawdown(df).round(3).to_string(index=False))
     print("\n=== actionable window (confidence >= 0.6) ===")
     print(window_summary(actionable_window(panel)).round(3).to_string(index=False))
