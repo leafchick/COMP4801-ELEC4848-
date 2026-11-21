@@ -161,6 +161,76 @@ def diagnose_drawdown(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("auc_dd", ascending=False)
 
 
+def actionable_window(panel: pd.DataFrame, tau: float = 0.6) -> pd.DataFrame:
+    """What is left to capture when the shape first becomes predictable?
+
+    For every test episode and every observation fraction we record the return
+    already realised between episode onset and the decision date, and the
+    return over the 20 trading days *after* the decision.  ``tau`` is the
+    confidence needed before a decision is considered issued.
+
+    The point of the table is not to find a profitable trade.  It answers the
+    proposal's question -- if the call only becomes reliable after the price
+    has moved, the model has no actionable value -- and it can answer it
+    either way.
+    """
+    from .load_data import load_social_signal, wide_attention
+    from .models import _FEATURES, build_table, fit_logistic, split_by_date
+
+    ep = pd.read_csv(INTERIM / "episodes.csv", parse_dates=["start", "end"])
+    lab = pd.read_csv(INTERIM / "episodes_labeled.csv")
+    ep = ep[ep["status"] == "complete"].merge(lab, on="episode_id")
+    ep = ep.rename(columns={"shape_final": "shape"})
+
+    Z = wide_attention(load_social_signal("2021-12-31"), "2021-12-31")
+    table = build_table(ep, Z)
+    train, test = split_by_date(table)
+    model = fit_logistic(train)
+    classes = list(model.classes_)
+
+    test = test.copy()
+    p = model.predict_proba(test[_FEATURES])
+    test["p_true"] = p[np.arange(len(test)), [classes.index(v) for v in test["label"]]]
+
+    pn = panel.sort_values(["permno", "date"]).copy()
+    pn["px"] = pn.groupby("permno")["ret"].transform(lambda s: (1 + s).cumprod())
+    info = ep.set_index("episode_id")
+
+    rows = []
+    for e in test.itertuples():
+        meta = info.loc[e.episode_id]
+        sub = pn[pn["permno"] == meta.permno]
+        dates = sub["date"].to_numpy()
+        idx = int(np.searchsorted(dates, np.datetime64(meta.start, "D")))
+        k = int(round(meta.n_days * e.frac))
+        if idx + k + 20 >= len(dates):
+            continue
+        p0 = sub["px"].iloc[idx]
+        p1 = sub["px"].iloc[idx + k]
+        p2 = sub["px"].iloc[idx + k + 20]
+        rows.append({"episode_id": e.episode_id, "frac": e.frac, "p_true": e.p_true,
+                     "issued": bool(e.p_true >= tau),
+                     "r_before": p1 / p0 - 1, "r_after": p2 / p1 - 1})
+    return pd.DataFrame(rows)
+
+
+def window_summary(w: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for f in sorted(w["frac"].unique()):
+        for label, sub in (("all", w[w["frac"] == f]),
+                           ("issued", w[(w["frac"] == f) & w["issued"]]),
+                           ("not issued", w[(w["frac"] == f) & ~w["issued"]])):
+            if len(sub) < 10:
+                continue
+            rows.append({
+                "frac": f, "group": label, "n": len(sub),
+                "median_r_before": sub["r_before"].median(),
+                "median_r_after": sub["r_after"].median(),
+                "share_negative_after": (sub["r_after"] < 0).mean(),
+            })
+    return pd.DataFrame(rows)
+
+
 if __name__ == "__main__":
     panel = build_panel()
     df = add_targets(episode_outcomes(panel))
@@ -170,3 +240,5 @@ if __name__ == "__main__":
     print(compare(df).pivot(index="outcome", columns="model", values="auc").round(3).to_string())
     print("\n=== how much of drawdown is just volatility ===")
     print(diagnose_drawdown(df).round(3).to_string(index=False))
+    print("\n=== actionable window (confidence >= 0.6) ===")
+    print(window_summary(actionable_window(panel)).round(3).to_string(index=False))
